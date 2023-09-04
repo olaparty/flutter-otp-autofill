@@ -129,7 +129,7 @@ class OTPPlugin : FlutterPlugin, MethodCallHandler, PluginRegistry.ActivityResul
                 } else {
                     // Consent denied. User can type OTC manually.
                 }
-            credentialPickerRequest -> if (resultCode == Activity.RESULT_OK && data != null) {
+            credentialPickerRequest -> if (resultCode == Activity.RESULT_OK && data != null && context != null) {
                 val phoneNumber =
                     Identity.getSignInClient(context!!).getPhoneNumberFromIntent(data)
                 lastResult?.success(phoneNumber)
