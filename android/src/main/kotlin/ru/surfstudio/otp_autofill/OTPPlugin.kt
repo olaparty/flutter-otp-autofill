@@ -127,6 +127,7 @@ public class OTPPlugin : FlutterPlugin, MethodCallHandler, PluginRegistry.Activi
             credentialPickerRequest -> if (resultCode == Activity.RESULT_OK && data != null) {
                 val credential = data.getParcelableExtra<Credential>(Credential.EXTRA_KEY)
                 lastResult?.success(credential?.id)
+                lastResult = null
             }
         }
         return true
