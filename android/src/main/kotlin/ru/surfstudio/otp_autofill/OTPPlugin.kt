@@ -4,10 +4,11 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.os.Build
+import androidx.activity.result.IntentSenderRequest.*
 import androidx.annotation.NonNull;
-import com.google.android.gms.auth.api.credentials.Credential
-import com.google.android.gms.auth.api.credentials.Credentials
-import com.google.android.gms.auth.api.credentials.HintRequest
+import com.google.android.gms.auth.api.identity.GetPhoneNumberHintIntentRequest
+import com.google.android.gms.auth.api.identity.Identity
 import com.google.android.gms.auth.api.phone.SmsRetriever
 
 import io.flutter.embedding.engine.plugins.FlutterPlugin
@@ -38,13 +39,14 @@ const val getAppSignatureMethod: String = "getAppSignature"
 const val senderTelephoneNumber: String = "senderTelephoneNumber"
 
 /** OtpTextEditControllerPlugin */
-public class OTPPlugin : FlutterPlugin, MethodCallHandler, PluginRegistry.ActivityResultListener, ActivityAware {
+class OTPPlugin : FlutterPlugin, MethodCallHandler, PluginRegistry.ActivityResultListener, ActivityAware {
 
     private lateinit var channel: MethodChannel
 
     private var smsUserConsentBroadcastReceiver: SmsUserConsentReceiver? = null
     private var smsRetrieverBroadcastReceiver: SmsRetrieverReceiver? = null
     private var activity: Activity? = null
+    private val request = GetPhoneNumberHintIntentRequest.builder().build()
 
     override fun onAttachedToEngine(@NonNull flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
         context = flutterPluginBinding.applicationContext
@@ -93,23 +95,27 @@ public class OTPPlugin : FlutterPlugin, MethodCallHandler, PluginRegistry.Activi
 
     private fun showNumberHint(result: Result) {
         lastResult = result
-        if (activity != null) {
-            val hintRequest = HintRequest.Builder()
-                    .setPhoneNumberIdentifierSupported(true)
-                    .build()
-            val credentialsClient = Credentials.getClient(activity!!)
-            val intent = credentialsClient.getHintPickerIntent(hintRequest)
-            activity!!.startIntentSenderForResult(
-                    intent.intentSender,
-                    credentialPickerRequest,
-                    null, 0, 0, 0
-            )
-        }
 
+        if(activity == null) return
+
+        // if activity is not null will build 'show hint' intent
+        // on success will start showing hint
+        Identity.getSignInClient(activity!!)
+            .getPhoneNumberHintIntent(request)
+            .addOnSuccessListener { res ->
+                res.intentSender
+                val request = Builder(res).build()
+
+                activity!!.startIntentSenderForResult(request.intentSender, credentialPickerRequest,
+                    null, 0, 0, 0)
+            }
     }
+
 
     override fun onDetachedFromEngine(@NonNull binding: FlutterPlugin.FlutterPluginBinding) {
         channel.setMethodCallHandler(null)
+        /// when activity being replaced by another activity or destroyed - unregister receivers
+        unRegisterBroadcastReceivers()
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
@@ -125,9 +131,16 @@ public class OTPPlugin : FlutterPlugin, MethodCallHandler, PluginRegistry.Activi
                     // Consent denied. User can type OTC manually.
                 }
             credentialPickerRequest -> if (resultCode == Activity.RESULT_OK && data != null) {
-                val credential = data.getParcelableExtra<Credential>(Credential.EXTRA_KEY)
-                lastResult?.success(credential?.id)
-                lastResult = null
+                // Check if the result is for credential picker
+                if (data.hasExtra(SmsRetriever.EXTRA_SMS_MESSAGE)) {
+                    // This is a result from the SMS consent picker
+                    val phoneNumber =
+                            Identity.getSignInClient(context!!).getPhoneNumberFromIntent(data)
+                    lastResult?.success(phoneNumber)
+                    lastResult = null
+                } else {
+                    // This is not a result from the SMS consent picker, ignore it
+                }
             }
         }
         return true
@@ -174,7 +187,23 @@ public class OTPPlugin : FlutterPlugin, MethodCallHandler, PluginRegistry.Activi
         }
 
         val intentFilter = IntentFilter(SmsRetriever.SMS_RETRIEVED_ACTION)
-        this.activity?.registerReceiver(smsUserConsentBroadcastReceiver, intentFilter, SmsRetriever.SEND_PERMISSION, null)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            this.activity?.registerReceiver(
+                smsUserConsentBroadcastReceiver,
+                intentFilter,
+                SmsRetriever.SEND_PERMISSION,
+                null,
+                Context.RECEIVER_EXPORTED,
+            )
+        } else {
+            this.activity?.registerReceiver(
+                smsUserConsentBroadcastReceiver,
+                intentFilter,
+                SmsRetriever.SEND_PERMISSION,
+                null
+            )
+        }
     }
 
     private fun registerSmsRetrieverBroadcastReceiver() {
@@ -195,7 +224,17 @@ public class OTPPlugin : FlutterPlugin, MethodCallHandler, PluginRegistry.Activi
         }
 
         val intentFilter = IntentFilter(SmsRetriever.SMS_RETRIEVED_ACTION)
-        this.activity?.registerReceiver(smsRetrieverBroadcastReceiver, intentFilter)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            this.activity?.registerReceiver(
+                smsRetrieverBroadcastReceiver,
+                intentFilter,
+                Context.RECEIVER_EXPORTED
+            )
+        } else {
+            this.activity?.registerReceiver(
+                smsRetrieverBroadcastReceiver, intentFilter,
+            )
+        }
     }
 
     private fun unRegisterBroadcastReceivers() {
